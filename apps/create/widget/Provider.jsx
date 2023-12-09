@@ -1,9 +1,20 @@
 /*__@import:everything/utils/UUID__*/
 /*__@import:everything/sdk__*/
 /*__@import:QoL/storage__*/
+const refresh = (timeout) => {
+  timeout = timeout ?? 1000;
+  setTimeout(() => {
+    console.log("refresh");
+    State.update({
+      rand: Math.random(),
+    });
+  }, timeout);
+}
 
 State.init({
   debug: true,
+  rand: Math.random(),
+  ready: false,
 });
 
 const accountId = context.accountId;
@@ -175,15 +186,35 @@ const handleDocument = {
     return doc;
   },
 
+  fetchTitle: (did) => {
+    const doc = Social.get(`${accountId}/thing/${did}/data/title`);
+    return doc;
+  },
+
   // TODO
   fetchAll: (pid) => {
-    const docs = JSON.parse(Social.get(`${accountId}/thing/${pid}/documents`) || "null");
+    const docsIds = Social.get(`${accountId}/thing/${pid}/documents`);
+    if (docsIds === null) return null;
+    const docs = {};
+    let isNull = false;
+    JSON.parse(docsIds || "[]")?.forEach((fdid) => {
+      const did = fdid.split(DOC_SEPARATOR).at(-1);
+      const doc = handleDocument.fetch(did);
+      if (doc === null) isNull = true;
+      docs[fdid] = doc;
+    });
+    if (isNull) return null;
     return docs;
   },
 
   // TODO
   fetchAllTitles: (pid, path) => {
-    const docs = Social.get(`${accountId}/document/${pid}/*/title`);
+    const docsIds = JSON.parse(Social.get(`${accountId}/thing/${pid}/documents`) || "[]");
+    const docs = {};
+    docsIds?.forEach((did) => {
+      const doc = handleDocument.fetchTitle(did);
+      docs[did] = doc;
+    });
     return docs;
   },
 
@@ -203,7 +234,7 @@ const handleDocument = {
     const doc = handleDocument.get(path);
     delete doc._;
     const did = path.split(DOC_SEPARATOR).pop();
-    
+
     // TODO: check if document has already been added
     function addDocumentToProject() {
       const project = handleProject.get(pid);
@@ -312,9 +343,9 @@ const handleProject = {
     }
 
     const docs = handleDocument.fetchAll(pid);
-    if (docs === null) return;
+    if (docs === null) return refresh(1000);
 
-    docs.forEach((path) => {
+    Object.keys(docs || {}).forEach((path) => {
       const doc = docs[path];
       const localDoc = handleDocument.get(path);
       if (!localDoc || new Date(doc.updatedAt) > new Date(localDoc.updatedAt)) {
@@ -323,14 +354,14 @@ const handleProject = {
     });
 
     store(KEYS.init(pid), new Date().toISOString());
-    console.log("Project initialized");
+    State.update({ ready: true });
   },
 };
 
 /**
  * Initialize
  */
-props.project && handleProject.init(props.project);
+props.project && handleProject.init(props.project, !State.ready);
 
 const handleUtils = {
   /**
